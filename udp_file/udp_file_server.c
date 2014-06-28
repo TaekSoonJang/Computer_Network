@@ -3,25 +3,35 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+/*
+udpÀÇ ÆĞÅ¶·Î½º¿¡ ´ëÇØ Å¸ÀÓ¾Æ¿ôÀ» °É¾î¼­
+recvfromÀÇ ºí¶ôÅ·ÇÔ ¼ö ¼ºÁúÀ» ÇØ°áÇÏ±â À§ÇÑ
+Çì´õ ºÎºĞ ¼±¾ğ
+*/
 #include <errno.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
-
+/*
+udp¿¡¼­ ÆĞÅ¶·Î½º¿¡ ´ëÇÑ Ã¼Å©¸¦ À§ÇØ, tcp¿¡¼­ ÇÏ´Â µ¿ÀÛÀÎ
+½ÃÄö½Ì°ú Å¸ÀÓ¾Æ¿ô ¸®Æ®·£½º¹Ì¼ÇÀ» Á¦°øÇÏ±â À§ÇÏ¿© Çì´õÁ¤º¸¿¡ ½ÃÄö½º Á¤º¸ Ãß°¡
+udpÀÇ ¹öÆÛ´Â »çÀÌÁî´Â 1024·Î ¼³Á¤
+ÀÌÁß 16¹ÙÀÌÆ®´Â Çì´õ Á¤º¸°¡ µé¾î°¡°í 1008 »çÀÌÁî´Â µ¥ÀÌÅÍ°¡ µé¾î°¨
+*/
 #define BUF_SIZE 1024
 #define HEADER_SIZE 16
 #define DATA_SIZE 1008
 
-static const unsigned int TIMEOUT_SECS = 2; //ì¬ì „ì†¡ ê¸°ë‹¤ë¦¬ëŠ” ì‹œê°„
-static const unsigned int MAXTRIES = 5;// í¬ê¸°í•  ë•Œê¹Œì§€ ë°˜ë³µí•˜ëŠ” íšŸìˆ˜
+static const unsigned int TIMEOUT_SECS = 2; //ÀçÀü¼Û ±â´Ù¸®´Â ½Ã°£
+static const unsigned int MAXTRIES = 5;// Æ÷±âÇÒ ¶§±îÁö ¹İº¹ÇÏ´Â È½¼ö
+unsigned int tries = 0;//º¸³½ È½¼ö( ½Ã±×³Î ÇÚµé·¯ÀÇ Á¢±ÙÀ» À§ÇØ Àü¿ªº¯¼ö Ã³¸®)
 
-unsigned int tries = 0;//ë³´ë‚¸ íšŸìˆ˜( ì‹œê·¸ë„ í•¸ë“¤ëŸ¬ì˜ ì ‘ê·¼ì„ ìœ„í•´ ì „ì—­ë³€ìˆ˜ ì²˜ë¦¬)
-
-void CatchAlarm( int ignored )
+void CatchAlarm( int ignored ) //Å¸ÀÓ¾Æ¿ôÀÌ ³µÀ» °æ¿ì Àç½Ãµµ ÇÏ´Â È½¼ö¸¦ ¼³Á¤
 {
 	tries += 1;
-}//SIGALRM í•¸ë“¤ëŸ¬
+}//SIGALRM ÇÚµé·¯
+
 
 void error_handling(char *message){
 	fputs(message, stderr);
@@ -30,55 +40,55 @@ void error_handling(char *message){
 }
 
 int main(int argc, char *argv[]){
-	int serv_sd, clnt_sd;
+	int serv_sd, clnt_sd; //¼ÒÄÏ »ı¼ºÀ» À§ÇÑ º¯¼ö ¼±¾ğ
+	
 	char buf[BUF_SIZE], temp[DATA_SIZE],header[BUF_SIZE], data[DATA_SIZE], init[DATA_SIZE], recv_buf[BUF_SIZE],send_buf[BUF_SIZE];
+	//Á¤º¸¸¦ ´ãÀ» ¹öÆÛ»çÀÌÁî, Ã³À½ udpÀÇ ½ÃÀÛÀ» ¾Ë¸®´Â init ¹öÆÛ, Çì´õ¿Í payload¸¦ ´ãÀ» ¹öÆÛ ¹× º¸³»´Â ¹öÆÛ, ¹Ş´Â ¹öÆÛ¸¦ °¢°¢ µû·Î ¼³Á¤
 	
 	int read_cnt, send_str_len,recv_str_len;
+	//°¢°¢ÀÇ ¹ŞÀº ±æÀÌ, º¸³½ ±æÀÌÀÇ Á¤º¸¸¦ ´ãÀ» º¯¼ö ¼±¾ğ
 	
 	struct sockaddr_in serv_adr;
 	struct sockaddr_in clnt_adr;
 	
-	socklen_t clnt_adr_sz;
-	FILE * fp;
+	//ÇöÀç ¼ÒÄÏ Á¤º¸¿Í, ¾îµğ·ÎºÎÅÍ ¿Ô´ÂÁö ¸ñÀûÁö ÁÖ¼Ò¸¦ ´ãÀ» º¯¼ö ¼±¾ğ
+	socklen_t clnt_adr_sz;	// ÁÖ¼ÒÀÇ »çÀÌÁî Á¤º¸¸¦ ´ãÀ» º¯¼ö ¼±¾ğ
+	FILE * fp; //ÀĞ°íÀÚ ÇÏ´Â ÆÄÀÏÀ» ÀĞ¾î¿À±â À§ÇÑ ÆÄÀÏ Æ÷ÀÎÅÍ ¼±¾ğ
 	
+
+	
+	
+	//  IP¿Í Æ÷Æ®·ÎÀÇ Á¢¼Ó ¼º°ø¿©ºÎÈ®ÀÎÀ» À§ÇÑ ÇÔ¼ö
 	if(argc!=2){
 		printf("Usage : %s <port>\n",argv[0]);
 		exit(1);
 	}
 
+	//º¸³¾ ÆÄÀÏÀ» ÀĞ±â Àü¿ëÀ¸·Î ¿­°í, ÆÄÀÏÆ÷ÀÎÅÍ¿¡ ´ãÀ½
 	fp = fopen("lec11.pdf","rb");
-	serv_sd = socket( PF_INET, SOCK_DGRAM, 0 );
+	serv_sd = socket( PF_INET, SOCK_DGRAM, 0 );//IPv4ÇÁ·ÎÅäÄİ Ã¼°è·Î udp ÀÇ µ¥ÀÌÅÍ ±×·¥ Çü½ÄÀÇ ¼ÒÄÏÀ» »ı¼º
 	
-	if(serv_sd==-1)
+	if(serv_sd==-1)//¼ÒÄÏ »ı¼º ¿©ºÎ È®ÀÎ
 		error_handling("socket() error");
 
-	memset(&serv_adr,0,sizeof(serv_adr));
+	memset(&serv_adr,0,sizeof(serv_adr));//ÁÖ¼ÒÁ¤º¸¸¦ ´ãÀ» ±¸Á¶Ã¼ ÃÊ±âÈ­
 	
-	serv_adr.sin_family=AF_INET;
-	serv_adr.sin_addr.s_addr=htonl(INADDR_ANY);
-	serv_adr.sin_port=htons(atoi(argv[1]));
+	serv_adr.sin_family=AF_INET;//IPv4 ÁÖ¼Ò Ã¼°è ÀÌ¿ë
+	serv_adr.sin_addr.s_addr=htonl(INADDR_ANY); //ÇØ´ç IPÁÖ¼Ò¸¦ ÀúÀå
+	serv_adr.sin_port=htons(atoi(argv[1]));//Æ÷Æ® Á¤º¸¸¦ ÀúÀå
 
+	//¼ÒÄÏ°ú Æ÷Æ® Á¤º¸¸¦ ¿¬°á
 	if(bind(serv_sd,(struct sockaddr*)&serv_adr, sizeof(serv_adr))==-1)
 		error_handling("bind() error");
 		
-	//while(1)
-	//{
-		clnt_adr_sz=sizeof(clnt_adr);
-		recv_str_len = recvfrom(serv_sd, buf, BUF_SIZE,0,(struct sockaddr*)&clnt_adr,&clnt_adr_sz);
-		
-		if( !strcmp(buf,"init") )
-		{
-			printf("Recieve from init request(server) \n");
-			//break;
-		}
-		else 
-		{
-			printf("init fail");
-		}
-	//}
 	
-	//printf("str_len : %d,     INIT HOST orderd port: %#x\n",str_len,clnt_adr.sin_port);
-	
+	//Ã³À½¿¡´Â ¹ß½ÅÁö¸¦ ¸ğ¸£¹Ç·Î, ÀÌ´Ö ÆĞÅ¶À» ÇÏ³ª ¹ŞÀ½
+	clnt_adr_sz=sizeof(clnt_adr);
+	recv_str_len = recvfrom(serv_sd, buf, BUF_SIZE,0,(struct sockaddr*)&clnt_adr,&clnt_adr_sz);
+
+	/*
+		ÆĞÅ¶ ·Î½º¿¡ ÀÇÇÑ Å¸ÀÓ¾Æ¿ô ¼³Á¤À» À§ÇÏ¿© ½Ã±×³Î ÇÔ¼ö¸¦ »ç¿ä.
+	*/
 	struct sigaction handler;
 	handler.sa_handler = CatchAlarm;
 	if( sigfillset(&handler.sa_mask)<0)
@@ -89,39 +99,41 @@ int main(int argc, char *argv[]){
 	if(sigaction(SIGALRM,&handler,0)<0)
 		printf("sigaction() failed for SIGALRM\n");
 		//DieWithSystemMessage("sigaction() failed for SIGALRM");
-		
-	alarm(TIMEOUT_SECS); //íƒ€ì´ë¨¸ ê°’ ì„¤ì •
 	
-	int order = 0;
-	int server_seq = 1, client_seq = 0;
+	//ÇØ´ç Å¸ÀÓ¾Æ¿ôÀÇ ½Ã°£À» ¼³Á¤
+	alarm(TIMEOUT_SECS); //Å¸ÀÌ¸Ó °ª ¼³Á¤
+	
+	int server_seq = 1, client_seq = 0;//½ÃÄö½ÌÀ» À§ÇÑ º¯¼ö ¼±¾ğ ,client_seq : client°¡ ´ÙÀ½ ¹ø ¹ŞÀ» ÆĞÅ¶ÀÇ ¼ø¼­, server_seq : ¼­¹ö°¡ º¸³½ ÆĞÅ¶ ¼ø¼­
 	
 	while(1)
 	{
+		//ÇØ´ç Á¤º¸¸¦ ´ãÀ» ¹öÆÛµéÀ» ÃÊ±âÈ­
 		memset(buf,0,sizeof(buf));
 		memset(header,0,sizeof(header));
 		memset(data,0,sizeof(data));
 		memset(temp,0,sizeof(temp));
 		
-		read_cnt = fread((void*)temp,1,DATA_SIZE, fp);
-		printf("read_cnt  = %d      ,        DATA_SZE = %d \n",read_cnt, DATA_SIZE );
-		sprintf( buf, "%d", server_seq );
+		read_cnt = fread((void*)temp,1,DATA_SIZE, fp); //temp¹öÆÛ¿¡ µ¥ÀÌÅÍ »çÀÌÁî¸¸Å­ ÀĞ¾î¿Í¼­ µ¥ÀÌÅÍ¸¦ ´ãÀ½
+
+		sprintf( buf, "%d", server_seq ); //¹öÆÛÀÇ 16¹ÙÀÌ¿¡ ÇØ´çÇÏ´Â ¾ÕÂÊ¿¡´Â ¼­¹ö°¡ º¸³»´Â ½ÃÄö½Ì ³Ñ¹ö¸¦ Çì´õÁ¤º¸·Î ³Ö¾îÁÜ
 		
-		if( read_cnt < DATA_SIZE )
+		if( read_cnt < DATA_SIZE ) //º¸³»°íÀÚ ÇÏ´Â ÆÄÀÏÀÌ ¸¶Áö¸· ºÎºĞÀÌ¶ó¸é ÇØ´ç ÆÄÀÏÀ» º¸³»ÁÖ°í Á¾·á
 		{ 
 			for( int i=HEADER_SIZE; i<HEADER_SIZE+read_cnt; ++i )
 			{
-				buf[i] = temp[i-HEADER_SIZE];
+				buf[i] = temp[i-HEADER_SIZE]; //¹öÆÛÀÇ µ¥ÀÌÅÍ°¡ µé¾î°¡¾ßÇÒ ºÎºĞ¿¡ temp¿¡ ´ã¾ÆµÎ¾ú´ø µ¥ÀÌÅÍ º¹»ç
 			}
 	
 			while(1)
 			{
-				int flag = 0;
+				int flag = 0; //ÀçÀü¼ÛÀ» È®ÀÎÇÏ´Â flag º¯¼ö
 				while(1)
 				{
 					send_str_len = sendto(serv_sd, buf, HEADER_SIZE+read_cnt, 0,(struct sockaddr*)&clnt_adr,clnt_adr_sz);
+					//Å¬¶óÀÌ¾ğÆ®·Î ÇØ´ç ¹öÆÛ¸¦ Àü¼Û
 					if( send_str_len == -1 )
 					{
-						printf("ì„œë²„ì—ì„œ íŒ¨í‚·ì„ ì „ì†¡í•˜ì§€ ëª»í–ˆìŒ \n");
+						//printf("¼­¹ö¿¡¼­ ÆĞÅ¶À» Àü¼ÛÇÏÁö ¸øÇßÀ½ \n");
 						continue;
 					}
 					else 
@@ -130,132 +142,127 @@ int main(int argc, char *argv[]){
 				
 				while(1)
 				{
-					alarm(TIMEOUT_SECS); //íƒ€ì´ë¨¸ ê°’ ì„¤ì •
+					alarm(TIMEOUT_SECS); //Å¸ÀÌ¸Ó °ª ¼³Á¤
 					recv_str_len = recvfrom(serv_sd, recv_buf, BUF_SIZE,0,(struct sockaddr*)&clnt_adr,&clnt_adr_sz);
+					//Å¬¶óÀÌ¾ğÆ®·ÎºÎÅÍ ack¸¦ Àß ¹Ş¾Ò´ÂÁö È®ÀÎ
+					//¸¸¾à Å¸ÀÓ¾Æ¿ôÀÌ ³ª¸é ´Ù½Ã ÀçÀü¼ÛÀ» ¿äÃ».
 					if( errno == EINTR && recv_str_len == -1)
 					{
+						printf("server time out!!");
 						flag = 1;
-						alarm(0); //íƒ€ì´ë¨¸ ê°’ ì„¤ì •
+						alarm(0); //Å¸ÀÌ¸Ó °ª ¼³Á¤
 						break;
 					}
 					if( recv_str_len == -1 )
 					{
-						printf( "clientë¡œë¶€í„° seqëª»ë°›ìŒ \n");
+						//printf( "client·ÎºÎÅÍ seq¸ø¹ŞÀ½ \n");
 						continue;
 					}
 					else
 						break;
 				}
 				if( flag )
-					continue;
+					continue;//Å¸ÀÓ¾Æ¿ôÀÌ ³µ´Ù¸é ´Ù½Ã À§·Î°¡¼­ ÀçÀü¼ÛÀ» ÇÔ.
 				
-				if( !strcmp(recv_buf,"resend") )
+				if( !strcmp(recv_buf,"resend") ) //¿ª½Ã resend¶ó´Â °ªÀÌ ¿Ô´Ù¸é ÀçÀü¼Û.
 				{
 					continue;
 				}
-				else //ì˜ ë°›ì•˜ìœ¼ë©´
+				else //Àß ¹Ş¾ÒÀ¸¸é
 				{	
-					client_seq = atoi(recv_buf);
-					printf("ë§ˆì§€ë§‰ ë¶€ë¶„ %dì—ì„œë¶€í„° %dê¹Œì§€ íŒ¨í‚·ì„ ì „ì†¡ \n",server_seq, client_seq -1 );
-					server_seq = client_seq;
+					client_seq = atoi(recv_buf); //¹ŞÀº Çì´õ¿¡¼­ ½ÃÄö½Ì ³Ñ¹ö¸¦ º¸°í , °»½Å
+					//printf("¸¶Áö¸· ºÎºĞ %d¿¡¼­ºÎÅÍ %d±îÁö ÆĞÅ¶À» Àü¼Û \n",server_seq, client_seq -1 );
+					server_seq = client_seq; //¼­¹ö¿¡¼­ º¸³¾ ½ÃÄö½Ì ³Ñ¹ö °»½Å
 					break;
 				}
 			}
-			//ì „ì†¡ ë
+			//Àü¼Û ³¡
 			break;
 		}
 		
 		
 		for( int i=HEADER_SIZE; i<HEADER_SIZE+DATA_SIZE; ++i )
 		{
-			buf[ i ] = temp[ i-HEADER_SIZE ];
+			buf[ i ] = temp[ i-HEADER_SIZE ];//¹öÆÛÀÇ µ¥ÀÌÅÍ°¡ µé¾î°¡¾ßÇÒ ºÎºĞ¿¡ temp¿¡ ´ã¾ÆµÎ¾ú´ø µ¥ÀÌÅÍ º¹»ç
 		}
-		
-		/*
-		printf(" BUF ë‚´ìš©ë¬¼ ì¶œë ¥ \n");
-		for( int i=0; i<BUF_SIZE; ++i )
-		{
-			printf("%02x",buf[i]);
-		}
-		printf("\n");
-		*/
 		
 		while(1)
 		{
-			int flag = 0;
+			int flag = 0;//ÀçÀü¼ÛÀ» È®ÀÎÇÏ´Â flag º¯¼ö
 			
 			while(1)
 			{
 				send_str_len = sendto(serv_sd, buf, BUF_SIZE, 0,(struct sockaddr*)&clnt_adr,clnt_adr_sz);
+				//Å¬¶óÀÌ¾ğÆ®·Î ÇØ´ç ¹öÆÛ¸¦ Àü¼Û
 				if( send_str_len == -1 )
 				{
-					printf("ì„œë²„ì—ì„œ íŒ¨í‚·ì„ ì „ì†¡í•˜ì§€ ëª»í–ˆìŒ \n");
+				//	printf("¼­¹ö¿¡¼­ ÆĞÅ¶À» Àü¼ÛÇÏÁö ¸øÇßÀ½ \n");
 					continue;
 				}
 				else 
 				{
 					//memset(chk_send,0,sizeof(chk_send));
-					printf("clientë¡œ íŒ¨í‚· ì „ì†¡ ì˜í–ˆìŒ\n");
-					strcpy(chk_send, buf);
+		//			printf("client·Î ÆĞÅ¶ Àü¼Û ÀßÇßÀ½\n");
+					//strcpy(chk_send, buf);
 					break;
 				}
 			}
 			
 			while(1)
 			{
-				alarm(TIMEOUT_SECS); //íƒ€ì´ë¨¸ ê°’ ì„¤ì •
+				alarm(TIMEOUT_SECS); //Å¸ÀÌ¸Ó °ª ¼³Á¤
 				recv_str_len = recvfrom(serv_sd, recv_buf, BUF_SIZE,0,(struct sockaddr*)&clnt_adr,&clnt_adr_sz);
+				//Å¬¶óÀÌ¾ğÆ®·ÎºÎÅÍ ack¸¦ Àß ¹Ş¾Ò´ÂÁö È®ÀÎ
+				//¸¸¾à Å¸ÀÓ¾Æ¿ôÀÌ ³ª¸é ´Ù½Ã ÀçÀü¼ÛÀ» ¿äÃ»
 				if ( errno == EINTR && recv_str_len == -1)
 				{
+					printf("server time out\n");
 					flag = 1;
-					alarm(0); //íƒ€ì´ë¨¸ ê°’ ì„¤ì •
-					printf(" intrrupt server recv \n");
+					alarm(0); //Å¸ÀÌ¸Ó °ª ¼³Á¤
+			//		printf(" intrrupt server recv \n");
 					break;
 				}
 				if( recv_str_len == -1 )
 				{
-					printf( "clientë¡œë¶€í„° seqëª»ë°›ìŒ \n");
+			//		printf( "client·ÎºÎÅÍ seq¸ø¹ŞÀ½ \n");
 					continue;
 				}
 				else
 				{
-					printf("clientë¡œë¶€í„° seqì˜ ë°›ìŒ\n");
+			//		printf("client·ÎºÎÅÍ seqÀß ¹ŞÀ½\n");
 					//strcpy(chk_recv, buf);
 					break;
 				}
 			}
-			if( flag == 1)
+			if( flag == 1)//Å¸ÀÓ¾Æ¿ôÀÌ ³µ´Ù¸é ´Ù½Ã À§·Î°¡¼­ ÀçÀü¼ÛÀ» ÇÔ.
 				continue;
 				
-			if( !strcmp(recv_buf,"resend") )
+			if( !strcmp(recv_buf,"resend") )//¿ª½Ã resend¶ó´Â °ªÀÌ ¿Ô´Ù¸é ÀçÀü¼Û.
 			{
-				printf(" resend í•´ì£¼ì„¸ìš” from server \n");
+		//		printf(" resend ÇØÁÖ¼¼¿ä from server \n");
 				continue;
 			}
-			else //ì˜ ë°›ì•˜ìœ¼ë©´
+			else //Àß ¹Ş¾ÒÀ¸¸é
 			{	
-				client_seq = atoi(recv_buf);
-				printf("%d ì—ì„œë¶€í„° %dê¹Œì§€ íŒ¨í‚·ì„ ì „ì†¡ \n",server_seq, client_seq -1 );
+				client_seq = atoi(recv_buf);//¹ŞÀº Çì´õ¿¡¼­ ½ÃÄö½Ì ³Ñ¹ö¸¦ º¸°í , °»½Å
+				/*
+			//	printf("%d ¿¡¼­ºÎÅÍ %d±îÁö ÆĞÅ¶À» Àü¼Û \n",server_seq, client_seq -1 );
 				for( int i=0; i<BUF_SIZE; ++i )
 				{
 				//	printf("%02x",chk_send[i]);
 				}
-				printf("\n\n\n");
+		//		printf("\n\n\n");
+		*/
 				server_seq = client_seq;
 				break;
 			}
 		}
 	}
 	
-	alarm(0);
+	alarm(0); //Å¸ÀÓ¾Æ¿ô ¼³Á¤ ÇØÁ¦
 	
-	//shutdown(clnt_sd,SHUT_WR);
-	//recv(clnt_sd,buf,BUF_SIZE);
-	//recvfrom(serv_sd,buf,BUF_SIZE,0,(struct sockaddr*)&clnt_adr,&clnt_adr_sz);
-	//printf("Message from client:%s \n",buf);
-	
-	printf("server end\n");
-	fclose(fp);
-	close(serv_sd);
+	printf("server end\n"); //¼­¹ö¿¡¼­ Àü¼ÛÀÌ ³¡³µÀ½À» ¾Ë¸®´Â ¸Ş½ÃÁö Ãâ·Â
+	fclose(fp);// ÆÄÀÏ Æ÷ÀÎÅÍ¸¦ ´İÀ½
+	close(serv_sd);//¼ÒÄÏÀ» ´İÀ½
 	return 0;
 }
